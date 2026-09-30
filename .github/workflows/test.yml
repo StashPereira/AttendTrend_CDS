@@ -1,0 +1,64 @@
+name: AttendTrend validation
+on: [push, pull_request]
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: attendtrend_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ephemeral-ci-only
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s
+          --health-timeout 5s --health-retries 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: sudo apt-get update && sudo apt-get install -y tesseract-ocr poppler-utils fonts-dejavu-core
+      - run: pip install -r requirements-dev.txt -c requirements-lock.txt
+        working-directory: backend
+      - name: PostgreSQL tests
+        run: pytest -q
+        working-directory: backend
+        env:
+          TEST_DATABASE_URL: postgresql+psycopg://postgres:ephemeral-ci-only@localhost:5432/attendtrend_test
+      - name: Fresh production schema
+        run: alembic upgrade head && alembic check
+        working-directory: backend
+        env:
+          DATABASE_URL: postgresql+psycopg://postgres:ephemeral-ci-only@localhost:5432/postgres
+      - run: npm ci && npm run build && npm test && npm audit
+        working-directory: frontend
+      - run: npx playwright install --with-deps chromium
+        working-directory: frontend
+      - name: Start complete application
+        run: |
+          (cd backend && alembic upgrade head && uvicorn app.main:app --host 127.0.0.1 --port 8000 > /tmp/api.log 2>&1 &)
+          (cd backend && python -m app.worker > /tmp/worker.log 2>&1 &)
+          (cd frontend && npm run preview -- --port 5173 > /tmp/frontend.log 2>&1 &)
+          python - <<'PY'
+          import urllib.request,time
+          for attempt in range(60):
+              try:
+                  urllib.request.urlopen('http://127.0.0.1:5173/api/health')
+                  break
+              except Exception:
+                  time.sleep(1)
+          else:
+              raise SystemExit('App startup timed out')
+          PY
+      - run: npx playwright test
+        working-directory: frontend
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: browser-results
+          path: frontend/test-results
