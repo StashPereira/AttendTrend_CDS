@@ -8,11 +8,15 @@ No original React source was present in the input archive.
 ## Start with Docker (recommended, including on Windows)
 
 Install Docker Desktop with Compose v2 and Python 3.12+. From this folder:
-
+Docker starts PostgreSQL, database migrations, the API, the
+notification/import worker, and the frontend.
 ```sh
 python scripts/configure.py
 docker compose up --build
 ```
+Check status: docker compose ps
+View logs: docker compose logs --tail=80
+Stop services: docker compose down
 
 Open **http://localhost:8080**. Create your own account. There are no bundled
 accounts, credentials, seeded students or fabricated attendance records.
@@ -20,6 +24,9 @@ accounts, credentials, seeded students or fabricated attendance records.
 The configuration script generates a private local database password. Keep the
 generated `.env`. PostgreSQL data and original uploads persist in named volumes.
 The migration service runs before the API and worker start.
+
+Existing local SQLite data is not automatically migrated.
+This setup runs locally; public access requires online hosting.
 
 ## Local development without Docker
 
